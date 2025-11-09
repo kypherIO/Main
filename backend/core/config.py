@@ -2,9 +2,10 @@
 Application Configuration Settings
 """
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Union
 import os
 from pathlib import Path
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     # Application
@@ -23,7 +24,14 @@ class Settings(BaseSettings):
     XAI_MODEL: str = "grok-beta"
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: Union[str, List[str]] = ["http://localhost:5173", "http://localhost:3000"]
+
+    @field_validator('CORS_ORIGINS', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(',')]
+        return v
 
     # Scraping
     SCRAPER_USER_AGENT: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
