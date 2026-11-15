@@ -1,9 +1,9 @@
 // Offline cache for Skyfold. Bump VERSION when shipping changes.
-const VERSION = 'skyfold-v1';
+const VERSION = 'skyfold-v2';
 const FILES = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './assets/icon.svg', './assets/icon-180.png', './assets/icon-192.png', './assets/icon-512.png',
-  './src/main.js', './src/config.js', './src/world.js', './src/sim.js', './src/input.js', './src/ui.js', './src/audio.js', './src/posture.js',
+  './src/main.js', './src/config.js', './src/world.js', './src/sim.js', './src/input.js', './src/ui.js', './src/audio.js', './src/posture.js', './src/ai.js', './src/events.js',
   './src/render/renderer.js', './src/render/cityview.js', './src/render/models.js', './src/render/geo.js', './src/render/textures.js',
   './vendor/three/three.module.min.js',
   './vendor/three/addons/postprocessing/EffectComposer.js', './vendor/three/addons/postprocessing/RenderPass.js',

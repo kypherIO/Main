@@ -1,5 +1,5 @@
 // World state: tile grids, terrain generation, persistence.
-import { MAP, N, K, mulberry32, clamp } from './config.js';
+import { MAP, N, K, SERVICE_IDS, mulberry32, clamp } from './config.js';
 
 function valueNoise(seed) {
   const rnd = mulberry32(seed);
@@ -40,7 +40,15 @@ export class World {
     this.lv = new Uint8Array(N);
     this.pollution = new Uint8Array(N);
     this.crime = new Uint8Array(N);
-    this.cov = { police: new Uint8Array(N), fire: new Uint8Array(N), school: new Uint8Array(N), hospital: new Uint8Array(N) };
+    this.cov = { police: new Uint8Array(N), fire: new Uint8Array(N), health: new Uint8Array(N), edu: new Uint8Array(N), transit: new Uint8Array(N), garbage: new Uint8Array(N) };
+    this.flags = new Uint8Array(N);    // F.ABANDONED | F.BURNING | F.RUBBLE
+    this.fireT = new Uint8Array(N);
+    this.distress = new Uint8Array(N);
+    this.garbage = new Uint8Array(N);
+    this.traffic = new Uint8Array(N);  // road congestion % (0..255)
+    this.commute = new Uint8Array(N);  // res commute minutes-ish (255 = no route)
+    this.happy = new Uint8Array(N);
+    this.nearestRoad = new Int32Array(N).fill(-1);
 
     this.name = 'New Harbor';
     this.seed = 1;
@@ -49,8 +57,38 @@ export class World {
     this.tax = { r: 9, c: 9, i: 9 };
     this.peakPop = 0;
     this.history = [];
-    this.version = 1;
+    this.version = 2;
+    this.resetMeta();
   }
+
+  resetMeta() {
+    this.budget = { police: 100, fire: 100, health: 100, edu: 100, transit: 100 };
+    this.policies = [];
+    this.loans = [];
+    this.approval = 60;
+    this.approvalMods = [];
+    this.news = [];
+    this.petitions = { active: [], offer: null, nextDay: 150 };
+    this.achievements = [];
+    this.counters = { firesOut: 0, firesLost: 0, petitionsDone: 0, petitionsFailed: 0, surplusMonths: 0 };
+    this.disasters = true;
+    this.districts = [];
+  }
+
+  // 4×4 grid of named neighbourhoods
+  nameDistricts() {
+    const rnd = mulberry32(this.seed ^ 0xabcdef);
+    const A = ['Harbor', 'Oak', 'Cedar', 'Maple', 'Summit', 'River', 'Lantern', 'Copper', 'Willow', 'Juniper', 'Granite', 'Sunset', 'Elm', 'Marina', 'Lark', 'Fern', 'Kestrel', 'Ash', 'Beacon', 'Clover', 'Saltwind', 'Orchard', 'Pier', 'Foundry'];
+    const B = [' Heights', ' Park', ' Village', ' Flats', ' Point', ' Gardens', ' Hill', ' Quarter', ' Commons', ' Row', ' Landing', 'side', 'wood', ' Bend', ' Square', ' Terrace'];
+    const used = new Set();
+    this.districts = [];
+    for (let k = 0; k < 16; k++) {
+      let n;
+      do { n = A[(rnd() * A.length) | 0] + B[(rnd() * B.length) | 0]; } while (used.has(n));
+      used.add(n); this.districts.push(n);
+    }
+  }
+  district(x, z) { return this.districts[((z / 16) | 0) * 4 + ((x / 16) | 0)] || 'Downtown'; }
 
   idx(x, z) { return z * MAP + x; }
   inb(x, z) { return x >= 0 && z >= 0 && x < MAP && z < MAP; }
@@ -107,6 +145,8 @@ export class World {
     for (let x = c - 9; x <= c + 9; x++) this.setRoad(x, c);
     for (let z = c - 6; z <= c + 6; z++) this.setRoad(c, z);
     this.funds = 50000; this.day = 0; this.peakPop = 0; this.history = [];
+    this.resetMeta();
+    this.nameDistricts();
   }
 
   setRoad(x, z) {
@@ -142,6 +182,9 @@ export class World {
       tax: this.tax, peakPop: this.peakPop, history: this.history.slice(-120),
       terrain: enc(this.terrain), kind: enc(this.kind), level: enc(this.level), variant: enc(this.variant),
       rot: enc(this.rot), svc: enc(this.svc), root: enc(this.root), tree: enc(this.tree),
+      flags: enc(this.flags), fireT: enc(this.fireT), distress: enc(this.distress), garbage: enc(this.garbage),
+      meta: { budget: this.budget, policies: this.policies, loans: this.loans, approval: this.approval, approvalMods: this.approvalMods,
+        news: this.news.slice(-40), petitions: this.petitions, achievements: this.achievements, counters: this.counters, disasters: this.disasters, districts: this.districts },
     });
   }
 
@@ -153,6 +196,13 @@ export class World {
     w.terrain.set(dec(o.terrain, Uint8Array)); w.kind.set(dec(o.kind, Uint8Array)); w.level.set(dec(o.level, Uint8Array));
     w.variant.set(dec(o.variant, Uint8Array)); w.rot.set(dec(o.rot, Uint8Array)); w.svc.set(dec(o.svc, Uint8Array));
     w.root.set(dec(o.root, Int32Array)); w.tree.set(dec(o.tree, Uint8Array));
+    if ((o.v || 1) < 2) { // v1 stored services in a different order
+      const old = ['wind', 'tower', 'park', 'police', 'fire', 'gas', 'school', 'solar', 'hospital', 'stadium'];
+      for (let i = 0; i < N; i++) if (w.svc[i]) w.svc[i] = SERVICE_IDS.indexOf(old[w.svc[i] - 1]) + 1;
+    }
+    for (const k of ['flags', 'fireT', 'distress', 'garbage']) if (o[k]) w[k].set(dec(o[k], Uint8Array));
+    if (o.meta) for (const k in o.meta) if (o.meta[k] !== undefined) w[k] = o.meta[k];
+    if (!w.districts || w.districts.length !== 16) w.nameDistricts();
     w.computeWaterDist();
     return w;
   }

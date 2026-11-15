@@ -11,8 +11,13 @@
 // A URL override (?posture=unfolded) or the settings menu can force a mode.
 
 export const DEVICE = {
-  // Tunables for the target foldable. Breakpoints are in CSS px and chosen to
-  // separate a phone-width cover display from a near-square inner display.
+  // Target: iPhone foldable inner display — 1878 × 2670 px at 430 ppi.
+  // At Apple's 3× scale that is 626 × 890 pt (aspect 0.70): it lands in the
+  // "unfolded" posture (portrait → desk docked below, landscape → beside).
+  // Balanced quality renders at 2× (1252 × 1780); Ultra renders native 3×.
+  inner: { px: [1878, 2670], ppi: 430, scale: 3, pt: [626, 890] },
+  // Breakpoints are in CSS px and separate a phone-width cover display from
+  // the near-square inner display.
   unfoldedMinShortSide: 560,
   unfoldedAspectRange: [0.62, 1.75],
   tabletMinShortSide: 740,

@@ -8,6 +8,7 @@ import { CameraRig, Input } from './input.js';
 import { UI } from './ui.js';
 import { Audio } from './audio.js';
 import { readPosture, watchPosture } from './posture.js';
+import { AI } from './ai.js';
 
 const SAVE_KEY = 'skyfold.city.v1';
 const SET_KEY = 'skyfold.settings.v1';
@@ -17,6 +18,11 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 const TOD = { dawn: 0.265, noon: 0.5, dusk: 0.765, night: 0.03 };
+// Native haptics in the iOS shell; vibration fallback elsewhere.
+const haptic = (kind = 'light') => {
+  const h = window.webkit?.messageHandlers?.skyfoldHaptics;
+  if (h) h.postMessage(kind); else navigator.vibrate?.(kind === 'heavy' ? 20 : 8);
+};
 
 class Game {
   constructor() {
@@ -24,6 +30,7 @@ class Game {
     if (params.get('posture')) this.settings.posture = params.get('posture');
     if (params.get('q') && QUALITY[params.get('q')]) this.settings.quality = params.get('q');
 
+    AI.init();
     this.r3d = new Renderer3D(document.getElementById('gl'));
     this.r3d.applyQuality(this.settings.quality);
     this.r3d.fpsCap = this.settings.fps;
@@ -75,7 +82,10 @@ class Game {
     return new Sim(world, {
       onTiles: (list) => { this.view?.onTiles(list); },
       onGrow: (i, up) => this.view?.onGrow(i, up),
-      onToast: (t, kind) => { if (!this.playing) return; this.ui?.toast(t, kind); if (kind === 'milestone') this.audio.milestone(); },
+      onToast: (t, kind, at) => { if (!this.playing) return; this.ui?.toast(t, kind, at); if (kind === 'milestone') { this.audio.milestone(); haptic('success'); } else if (kind === 'bad' && at != null) { this.audio.error(); haptic('heavy'); } },
+      onFire: (i, state) => { this.view?.onFire(i, state); },
+      onPetition: (p) => { if (this.playing) { this.ui?.showPetition(p); if (p) this.audio.select(); } },
+      onFeed: () => { if (this.playing && this.ui?.deskVisible()) this.ui.renderDesk(); },
       onMonth: () => {
         if (!this.playing) return;
         this.view.dirty.overlay = true;
@@ -114,6 +124,7 @@ class Game {
     this.resize();
     if (!this.demo && this.world.day < 60) this.tutorial = 0;
     this.ui.toast(`Welcome to ${this.world.name}, Mayor.`);
+    if (this.world.petitions.offer) this.ui.showPetition(this.world.petitions.offer);
   }
 
   newCity(name, seed) {
@@ -125,6 +136,7 @@ class Game {
     this.sim.refreshAll();
     this.view.setWorld(w);
     this.tutorial = 0;
+    this.ui.showPetition(null);
     this.save();
     this.hasSave = true;
     if (!this.playing) this.start(); else { this.rig.flyTo(0, 0, 24); this.ui.updateHUD(); this.ui.toast(`${name} has been founded!`, 'milestone'); }
@@ -145,6 +157,7 @@ class Game {
     if (k === 'fps') this.r3d.fpsCap = v;
     if (k === 'posture') this.applyPosture();
     if (k === 'sound') this.audio.setMuted(!v);
+    if (k === 'disasters') { this.world.disasters = v; delete this.settings.disasters; store.set(SET_KEY, JSON.stringify(this.settings)); }
   }
 
   applyPosture() {
@@ -174,6 +187,11 @@ class Game {
   }
 
   setOverlay(id) { this.view.setOverlay(id); this.ui.setOverlay(id); }
+
+  focusTile(x, z) {
+    this.rig.flyTo(x - MAP / 2 + 0.5, z - MAP / 2 + 0.5, Math.min(this.rig.dist, 22));
+    this.view.setCursor(x, z, 1, true);
+  }
 
   setTimeMode(m) {
     this.timeMode = m;
@@ -207,7 +225,7 @@ class Game {
     this.view.setCursor(0, 0, 1, true, false);
     document.getElementById('inspect').classList.add('hidden');
     if (id !== 'inspect') this.ui.hint(null);
-    const tips = { road: 'Drag to draw a road', res: 'Drag to zone homes next to roads', com: 'Drag to zone shops', ind: 'Drag to zone industry', bulldoze: 'Drag over things to demolish' };
+    const tips = { avenue: 'Drag to build avenues — or drag over streets to upgrade them', road: 'Drag to draw a street', res: 'Drag to zone homes next to roads', com: 'Drag to zone shops', ind: 'Drag to zone industry', bulldoze: 'Drag over things to demolish' };
     if (tips[id] && this.tutorial == null) this.flashHint(tips[id]);
     if (t.service) this.flashHint(`${SERVICES[t.service].name} · $${SERVICES[t.service].cost.toLocaleString()} — ${SERVICES[t.service].desc}`);
   }
@@ -223,7 +241,7 @@ class Game {
       toolMode: () => { const t = this.tool(); return !this.playing ? 'pan' : t.drag ? 'drag' : t.service ? 'tap' : 'pan'; },
       onAnyInput: () => { if (!this.playing) this.rig.orbit = 0; document.getElementById('layers').classList.add('hidden'); },
       onDown: (tile) => { if (!tile) return; this.drag = { a: tile, b: tile }; this.updateDrag(); },
-      onMove: (tile) => { if (!this.drag || !tile) return; if (tile.x !== this.drag.b.x || tile.z !== this.drag.b.z) { this.drag.b = tile; this.updateDrag(); this.audio.click(); } },
+      onMove: (tile) => { if (!this.drag || !tile) return; if (tile.x !== this.drag.b.x || tile.z !== this.drag.b.z) { this.drag.b = tile; this.updateDrag(); this.audio.click(); haptic('light'); } },
       onUp: () => this.commitDrag(),
       onCancel: () => { this.drag = null; this.view.setPreview([], '#fff'); this.ui.hint(null); },
       onHover: (tile) => this.hover(tile),
@@ -298,17 +316,19 @@ class Game {
     const colored = tiles.map(([x, z]) => {
       const i = w.idx(x, z), k = w.kind[i];
       let ok;
-      if (t.id === 'road') ok = !w.terrain[i] && (k === K.EMPTY || k === K.ROAD || (ZONES.includes(k) && !w.level[i])) && k !== K.ROAD;
+      if (t.id === 'road') ok = !w.terrain[i] && (k === K.EMPTY || (ZONES.includes(k) && !w.level[i]));
+      else if (t.id === 'avenue') ok = !w.terrain[i] && (k === K.EMPTY || (ZONES.includes(k) && !w.level[i]) || (k === K.ROAD && !w.level[i]));
       else if (t.zone) ok = !w.terrain[i] && (k === K.EMPTY || (ZONES.includes(k) && k !== t.zone && !w.level[i]));
       else ok = k !== K.EMPTY || !!w.tree[i];
       if (ok) count++;
       const zc = { res: '#5fd068', com: '#4aa8ff', ind: '#ffc547' }[t.id];
-      return [x, z, ok ? (t.id === 'bulldoze' ? '#ff8a4a' : zc || '#e8f6ff') : (t.id === 'road' && k === K.ROAD ? '#9fb3c8' : '#ff4d5a')];
+      return [x, z, ok ? (t.id === 'bulldoze' ? '#ff8a4a' : zc || '#e8f6ff') : ((t.id === 'road' || t.id === 'avenue') && k === K.ROAD ? '#9fb3c8' : '#ff4d5a')];
     });
     this.view.setPreview(colored);
     this.view.setCursor(this.drag.b.x, this.drag.b.z, 1, true);
-    const unit = t.id === 'road' ? COST.road : t.id === 'bulldoze' ? COST.bulldoze : COST.zone;
-    const cost = count * unit;
+    let cost = 0;
+    if (t.id === 'avenue') for (const [x, z, col] of colored) { if (col === '#e8f6ff') cost += w.kind[w.idx(x, z)] === K.ROAD ? COST.upgrade : COST.avenue; }
+    else cost = count * (t.id === 'road' ? COST.road : t.id === 'bulldoze' ? COST.bulldoze : COST.zone);
     this.ui.hint(`${t.label} · ${count} tile${count === 1 ? '' : 's'} · <span class="${cost > w.funds ? 'no' : 'ok'}">$${cost.toLocaleString()}</span>`);
   }
 
@@ -316,13 +336,14 @@ class Game {
     if (!this.drag) return;
     const t = this.tool(), tiles = this.dragTiles();
     let res;
-    if (t.id === 'road') res = this.sim.buildRoads(tiles);
+    if (t.id === 'road') res = this.sim.buildRoads(tiles, 0);
+    else if (t.id === 'avenue') res = this.sim.buildRoads(tiles, 1);
     else if (t.zone) res = this.sim.zone(tiles.rect, t.zone);
     else if (t.id === 'bulldoze') {
       res = this.sim.bulldoze(tiles.rect);
       if (res.ok) for (const [x, z] of tiles) if (Math.random() < 0.5) this.view.spawnDust(x - MAP / 2 + 0.5, z - MAP / 2 + 0.5, 1);
     }
-    this.feedback(res, () => (t.id === 'road' ? this.audio.road() : t.id === 'bulldoze' ? this.audio.bulldoze() : this.audio.zone()));
+    this.feedback(res, () => (t.id === 'road' || t.id === 'avenue' ? this.audio.road() : t.id === 'bulldoze' ? this.audio.bulldoze() : this.audio.zone()));
     this.drag = null;
     this.view.setPreview([], '#fff');
     if (this.tutorial == null) this.ui.hint(null);
@@ -330,8 +351,8 @@ class Game {
 
   feedback(res, ok) {
     if (!res) return;
-    if (res.ok) { ok(); navigator.vibrate?.(8); this.ui.updateHUD(); }
-    else { this.audio.error(); this.ui.toast(res.msg, 'bad'); }
+    if (res.ok) { ok(); haptic('light'); this.ui.updateHUD(); }
+    else { this.audio.error(); haptic('warning'); this.ui.toast(res.msg, 'bad'); }
   }
 
   // -------------------------------------------------------------- tutorial
@@ -344,7 +365,8 @@ class Game {
       { text: 'Place a <b>Wind Turbine</b> touching a road — power flows along streets', done: () => svc('wind') },
       { text: 'Zone <b>Shops</b> and <b>Industry</b> so residents have jobs', done: () => has((i) => w.kind[i] === K.COM) && has((i) => w.kind[i] === K.IND) },
       { text: 'Build a <b>Water Tower</b> so buildings can grow taller', done: () => svc('tower') },
-      { text: 'Pinch to zoom, twist to rotate. Unfold your phone to open the Mayor’s Desk!', done: () => (this._tutT = (this._tutT || 0) + 1) > 40 },
+      { text: 'Place a <b>Landfill</b> away from homes before garbage piles up', done: () => svc('landfill') },
+      { text: 'Pinch to zoom, twist to rotate. Unfold your phone for the Mayor’s Desk — budgets, policies, petitions and news.', done: () => (this._tutT = (this._tutT || 0) + 1) > 48 },
     ];
     while (this.tutorial < steps.length && steps[this.tutorial].done()) { this.tutorial++; if (this.tutorial < steps.length) this.audio.select(); }
     if (this.tutorial >= steps.length) { this.tutorial = null; this.ui.hint(null); this.ui.toast('Tutorial complete — your city is in your hands.', 'milestone'); return; }
@@ -420,6 +442,12 @@ function buildDemoCity(w, sim) {
     place(id, x, z);
   }
   for (const [x, z] of [[c - 12, c - 12], [c + 12, c - 12], [c - 12, c + 12], [c - 7, c - 12], [c + 3, c + 12]]) { sim.bulldoze({ x0: x, x1: x, z0: z, z1: z }); place('tower', x, z); }
+  const spot = (id, x, z) => { const s = SERVICES[id]; for (let oz = 0; oz < s.size; oz++) for (let ox = 0; ox < s.size; ox++) if (!isLand(x + ox, z + oz) || w.kind[w.idx(x + ox, z + oz)] === K.ROAD) return; sim.bulldoze({ x0: x, x1: x + s.size - 1, z0: z, z1: z + s.size - 1 }); place(id, x, z); };
+  spot('landfill', c + 11, c - 4); spot('landfill', c - 14, c + 3); spot('clinic', c - 6, c - 6); spot('clinic', c + 6, c + 6); spot('university', c + 6, c - 4);
+  for (const [x, z] of [[c - 1, c - 6], [c + 4, c + 1], [c - 6, c + 4], [c + 1, c + 9]]) spot('bus', x, z);
+  const av = [];
+  for (let k = -R; k <= R; k++) { if (isLand(c + k, c)) av.push([c + k, c]); if (isLand(c, c + k)) av.push([c, c + k]); }
+  sim.buildRoads(av, 1);
   for (let k = 0; k < 8; k++) { const x = c - R + 1 + k * 3, z = c - R - 1; if (isLand(x, z) && isLand(x, z + 1)) place('wind', x, z); }
   sim.rng = mulberry(7);
   for (let d = 0; d < 1400; d++) sim.step();

@@ -83,10 +83,10 @@ export function facadeTextures(style, seed = 1) {
 }
 
 // Road tile for a connection mask: bits N=1,E=2,S=4,W=8
-export function roadTexture(mask) {
+export function roadTexture(mask, avenue = false) {
   const S = 256, c = canvas(S), g = c.getContext('2d');
-  const rnd = mulberry32(mask * 31 + 7);
-  const sw = 46; // sidewalk width
+  const rnd = mulberry32(mask * 31 + 7 + (avenue ? 999 : 0));
+  const sw = avenue ? 22 : 46; // sidewalk width
   // sidewalk base
   g.fillStyle = '#b9b6ae'; g.fillRect(0, 0, S, S);
   for (let k = 0; k < 900; k++) { g.fillStyle = `rgba(0,0,0,${rnd() * 0.06})`; g.fillRect(rnd() * S, rnd() * S, 2, 2); }
@@ -117,7 +117,26 @@ export function roadTexture(mask) {
   const count = (N ? 1 : 0) + (E ? 1 : 0) + (So ? 1 : 0) + (W ? 1 : 0);
   const mid = S / 2;
   g.lineCap = 'butt';
-  if (count <= 2) {
+  if (avenue && count <= 2) {
+    const seg = (x0, y0, x1, y1) => { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
+    const lines = (off, color, dash, w) => {
+      g.strokeStyle = color; g.lineWidth = w; g.setLineDash(dash);
+      if (N && So) seg(mid + off, 0, mid + off, S); else if (E && W) seg(0, mid + off, S, mid + off);
+      else {
+        if (N) seg(mid + off, 0, mid + off, mid); if (So) seg(mid + off, mid, mid + off, S);
+        if (E) seg(mid, mid + off, S, mid + off); if (W) seg(0, mid + off, mid, mid + off);
+      }
+    };
+    // planted median
+    if ((N && So) || (E && W)) {
+      g.fillStyle = '#c9c4b8';
+      if (N && So) g.fillRect(mid - 9, 0, 18, S); else g.fillRect(0, mid - 9, S, 18);
+      g.fillStyle = '#5f8f45';
+      if (N && So) g.fillRect(mid - 6, 0, 12, S); else g.fillRect(0, mid - 6, S, 6 * 2);
+    } else { lines(-3, '#f2c94c', [], 3); lines(3, '#f2c94c', [], 3); }
+    lines(-52, 'rgba(240,240,235,0.85)', [16, 16], 3); lines(52, 'rgba(240,240,235,0.85)', [16, 16], 3);
+    g.setLineDash([]);
+  } else if (count <= 2) {
     // centre dashed line(s)
     g.strokeStyle = '#f2c94c'; g.lineWidth = 4; g.setLineDash([18, 14]);
     const seg = (x0, y0, x1, y1) => { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
@@ -223,5 +242,17 @@ export function contactShadowTexture(size = 128) {
     img.data[o] = img.data[o + 1] = img.data[o + 2] = 255; img.data[o + 3] = Math.round(a * a * 255);
   }
   g.putImageData(img, 0, 0);
+  return tex(c, { repeat: false });
+}
+
+// Zoned-lot marker: soft fill with a dashed survey border (tinted per zone).
+export function zonePlateTexture(size = 128) {
+  const c = canvas(size), g = c.getContext('2d');
+  g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(6, 6, size - 12, size - 12);
+  g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 5; g.setLineDash([14, 9]);
+  g.strokeRect(8, 8, size - 16, size - 16);
+  g.setLineDash([]);
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  for (const [x, y] of [[8, 8], [size - 8, 8], [8, size - 8], [size - 8, size - 8]]) { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); }
   return tex(c, { repeat: false });
 }

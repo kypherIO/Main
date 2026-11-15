@@ -23,6 +23,25 @@ export function createMaterials() {
   const woff = new THREE.MeshStandardMaterial({ vertexColors: true, map: fo.map, roughnessMap: fo.roughness, roughness: 1, metalness: 0.5, emissiveMap: fo.emissive, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.4 });
   const wind = new THREE.MeshStandardMaterial({ vertexColors: true, map: fi.map, roughnessMap: fi.roughness, roughness: 1, metalness: 0.25, emissiveMap: fi.emissive, emissive: 0xffffff, emissiveIntensity: 0 });
   const neon = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff });
+  // Dark instance tint (abandoned / burnt buildings) switches their lights off.
+  const dimLights = (m) => {
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vInstLum;')
+        .replace('#include <color_vertex>', '#include <color_vertex>\n#ifdef USE_INSTANCING_COLOR\nvInstLum = max(instanceColor.r, max(instanceColor.g, instanceColor.b));\n#else\nvInstLum = 1.0;\n#endif');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vInstLum;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= smoothstep(0.35, 0.6, vInstLum);');
+    };
+    m.customProgramCacheKey = () => 'dim';
+  };
+  [wres, woff, wind].forEach(dimLights);
+  const neonDim = neon;
+  neonDim.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vInstLum;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\n#ifdef USE_INSTANCING_COLOR\nvInstLum = max(instanceColor.r, max(instanceColor.g, instanceColor.b));\n#else\nvInstLum = 1.0;\n#endif');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vInstLum;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix(0.15, 1.0, smoothstep(0.35, 0.6, vInstLum));');
+  };
+  neonDim.customProgramCacheKey = () => 'neondim';
   const list = [plain, wres, woff, wind, neon];
   return {
     list, plain, wres, woff, wind, neon,
@@ -339,7 +358,69 @@ export const ZONE_MODELS = { 2: [null, resL1, resL2, resL3], 3: [null, comL1, co
 export function serviceModel(id) {
   const b = new GeoBuilder(), em = [];
   let blades = null, extra = {};
-  if (id === 'wind') {
+  if (id === 'clinic') {
+    lot(b, CONCRETE);
+    b.box(0, Y0, -0.08, 0.76, FLOOR * 1.6, 0.56, '#f5f7f8', { side: G.WRES, top: '#a9b3bb' });
+    parapet(b, 0, Y0 + FLOOR * 1.6, -0.08, 0.76, 0.56, '#3fae78', 0.025, 0.04);
+    b.box(0, Y0, 0.21, 0.24, 0.18, 0.02, '#ffffff', { side: G.WOFF });
+    b.box(0, Y0 + 0.2, 0.28, 0.36, 0.02, 0.16, '#3fae78');
+    b.box(0.22, Y0 + 0.24, 0.205, 0.1, 0.03, 0.006, '#43e08a', { side: G.NEON });
+    b.box(0.22, Y0 + 0.24, 0.205, 0.03, 0.1, 0.006, '#43e08a', { side: G.NEON });
+    smallTree(b, -0.36, 0.36, 1.1); bush(b, 0.38, 0.4, 0.05);
+  } else if (id === 'university') {
+    lot(b, '#6c9b4c', 2);
+    b.box(0, Y0, -0.45, 1.3, FLOOR * 2.4, 0.6, '#e9e1cf', { side: G.WRES, top: '#7f8a90' });
+    for (let k = -3; k <= 3; k++) b.cyl(k * 0.13, Y0 + 0.02, -0.13, 0.025, FLOOR * 2.1, 8, '#f4efe4');
+    b.box(0, Y0, -0.13, 0.98, 0.03, 0.1, '#ddd4c2');
+    b.box(0, Y0 + FLOOR * 2.1, -0.13, 1.0, 0.05, 0.12, '#efe8da');
+    b.gable(0, Y0 + FLOOR * 2.4, -0.45, 1.34, 0.16, 0.64, '#6f7c84');
+    b.cyl(0, Y0 + FLOOR * 2.4 + 0.1, -0.45, 0.2, 0.12, 16, '#e9e1cf');
+    b.sphere(0, Y0 + FLOOR * 2.4 + 0.2, -0.45, 0.2, 14, '#5d8fa0', 0.85);
+    b.box(-0.75, Y0, 0.35, 0.4, FLOOR * 2, 0.8, pick(BRICK, 1), { side: G.WRES, top: '#5a636b' });
+    b.box(0.78, Y0, 0.45, 0.3, 0.95, 0.3, pick(BRICK, 1), { side: G.WRES });
+    b.box(0.78, Y0 + 0.95, 0.45, 0.34, 0.04, 0.34, '#efe8da');
+    b.cone(0.78, Y0 + 0.99, 0.45, 0.2, 0.3, 4, '#4f6670');
+    b.box(0.78, Y0 + 0.7, 0.602, 0.12, 0.12, 0.006, '#fff3c4', { side: G.NEON });
+    b.box(0.05, Y0, 0.45, 0.5, 0.004, 0.8, '#d6ccb4');
+    for (const [tx, tz] of [[-0.3, 0.2], [0.4, 0.15], [-0.3, 0.75], [0.4, 0.8]]) smallTree(b, tx, tz, 1.4);
+  } else if (id === 'bus') {
+    lot(b, '#a7a49d');
+    b.box(0.05, Y0 + 0.2, 0.22, 0.46, 0.02, 0.16, '#2f6fd6');
+    b.box(0.05, Y0, 0.15, 0.46, 0.2, 0.012, '#ffffff', { side: G.WOFF });
+    for (const px of [-0.17, 0.27]) b.box(px, Y0, 0.29, 0.02, 0.2, 0.02, '#cfd6dc');
+    b.box(0.05, Y0, 0.2, 0.34, 0.05, 0.06, '#7b5a3c');
+    b.cyl(-0.33, Y0, 0.36, 0.01, 0.4, 4, '#cfd6dc');
+    b.box(-0.33, Y0 + 0.36, 0.36, 0.12, 0.12, 0.012, '#38a0ff', { side: G.NEON });
+    smallTree(b, 0.32, -0.3, 1.3); smallTree(b, -0.3, -0.32, 1.1);
+  } else if (id === 'metro') {
+    lot(b, '#b9b5ad');
+    b.box(0, Y0, -0.05, 0.62, 0.28, 0.5, '#ffffff', { side: G.WOFF, top: '#bfe3ff' });
+    b.box(0, Y0 + 0.28, -0.05, 0.68, 0.025, 0.56, '#d8dde2');
+    b.box(0, Y0, 0.26, 0.3, 0.012, 0.16, '#3b3f45');
+    b.cyl(0.36, Y0, 0.36, 0.012, 0.5, 5, '#d8dde2');
+    b.box(0.36, Y0 + 0.5, 0.36, 0.16, 0.16, 0.03, '#d4242a', { side: G.NEON, topGroup: G.NEON });
+    b.box(0.36, Y0 + 0.5, 0.378, 0.1, 0.1, 0.004, '#ffffff', { side: G.NEON });
+    for (const [bx, bz] of [[-0.38, 0.38], [-0.38, -0.38]]) bush(b, bx, bz, 0.06);
+  } else if (id === 'landfill') {
+    lot(b, '#7d7262', 2);
+    for (let k = -4; k <= 4; k++) { b.box(k * 0.22, Y0, -0.94, 0.015, 0.12, 0.015, '#666'); b.box(k * 0.22, Y0, 0.94, 0.015, 0.12, 0.015, '#666'); b.box(-0.94, Y0, k * 0.22, 0.015, 0.12, 0.015, '#666'); b.box(0.94, Y0, k * 0.22, 0.015, 0.12, 0.015, '#666'); }
+    b.box(0, Y0 + 0.1, -0.94, 1.9, 0.01, 0.01, '#777'); b.box(0, Y0 + 0.1, 0.94, 1.9, 0.01, 0.01, '#777');
+    const mounds = [[-0.4, -0.35, 0.5, '#6f6656'], [0.35, -0.3, 0.42, '#7d7363'], [-0.2, 0.35, 0.38, '#6a6152'], [0.45, 0.45, 0.3, '#857a69']];
+    for (const [mx, mz, r, c] of mounds) b.sphere(mx, Y0 - r * 0.15, mz, r, 10, c, 0.42);
+    const junk = ['#c0392b', '#2f6aa8', '#e2b33c', '#ececec', '#3a7d44'];
+    for (let k = 0; k < 26; k++) { const a = k * 2.4, r = 0.15 + (k % 7) * 0.09; b.box(Math.cos(a) * r - 0.05, Y0 + 0.12 + (k % 3) * 0.03, Math.sin(a) * r, 0.04, 0.03, 0.05, junk[k % junk.length]); }
+    b.box(0.6, Y0, -0.7, 0.16, 0.08, 0.1, '#e2b33c'); b.box(0.68, Y0 + 0.02, -0.7, 0.04, 0.06, 0.12, '#555');
+  } else if (id === 'recycling') {
+    lot(b, CONCRETE, 2);
+    b.box(-0.3, Y0, -0.35, 1.2, 0.5, 0.9, '#5fae6e', { side: G.WIND, top: '#4f8a5c' });
+    for (let k = 0; k < 4; k++) b.gable(-0.3, Y0 + 0.5, -0.35 - 0.45 + 0.1125 + k * 0.225, 1.18, 0.07, 0.225, '#6fbf7d');
+    b.translate(0.55, Y0, 0.05).rotateZ(0.5);
+    b.box(0, 0, 0, 0.7, 0.04, 0.12, '#555');
+    b.pop().pop();
+    const bins = ['#2f7fd6', '#3fae5a', '#e2b33c', '#d6453b'];
+    for (let k = 0; k < 8; k++) b.box(-0.8 + k * 0.2, Y0, 0.6, 0.14, 0.14, 0.2, bins[k % 4]);
+    b.box(-0.3, Y0 + 0.36, 0.105, 0.3, 0.12, 0.006, '#4dff8a', { side: G.NEON });
+  } else if (id === 'wind') {
     lot(b, LAWN);
     b.cyl(0, Y0, 0, 0.12, 0.05, 8, '#cfcfcf');
     b.cyl(0, Y0, 0, 0.045, 2.2, 10, '#f4f4f4', G.PLAIN, true, 0.025);
@@ -484,5 +565,30 @@ export function lampGeometry() {
   b.box(0, 0, 0, 0.018, 0.42, 0.018, '#4a4e54');
   b.box(0, 0.41, 0.05, 0.014, 0.014, 0.11, '#4a4e54');
   b.box(0, 0.395, 0.1, 0.04, 0.016, 0.06, '#ffe7b0', { side: G.NEON, topGroup: G.PLAIN });
+  return b.build();
+}
+
+export function rubbleGeometry() {
+  const b = new GeoBuilder();
+  b.box(0, 0, 0, 0.96, Y0 + 0.004, 0.96, '#4a4744');
+  const cols = ['#2e2b29', '#3a3634', '#55504b', '#1f1d1c', '#6b5f55'];
+  for (let k = 0; k < 18; k++) {
+    const a = k * 2.399, r = 0.05 + (k % 6) * 0.07;
+    b.translate(Math.cos(a) * r, Y0, Math.sin(a) * r).rotateY(a).rotateZ((k % 3 - 1) * 0.3);
+    b.box(0, 0, 0, 0.06 + (k % 4) * 0.04, 0.03 + (k % 3) * 0.03, 0.05 + (k % 5) * 0.03, cols[k % cols.length]);
+    b.pop().pop().pop();
+  }
+  b.translate(0.12, Y0 + 0.08, -0.1).rotateZ(0.7); b.box(0, 0, 0, 0.03, 0.34, 0.03, '#2a2422'); b.pop().pop();
+  b.translate(-0.15, Y0 + 0.06, 0.12).rotateX(-0.6); b.box(0, 0, 0, 0.03, 0.28, 0.03, '#2a2422'); b.pop().pop();
+  return b.build();
+}
+
+export function busGeometry() {
+  const b = new GeoBuilder();
+  b.box(0, 0.02, 0, 0.15, 0.13, 0.5, '#ffffff');
+  b.box(0, 0.08, 0, 0.152, 0.05, 0.46, '#ffffff', { side: G.WOFF, top: '#ffffff' });
+  for (const wx of [-0.07, 0.07]) for (const wz of [-0.17, 0.17]) b.box(wx, 0, wz, 0.02, 0.045, 0.06, '#1a1a1a');
+  for (const hx of [-0.05, 0.05]) { b.box(hx, 0.04, 0.251, 0.03, 0.02, 0.004, '#fff4d0', { side: G.NEON }); b.box(hx, 0.04, -0.251, 0.03, 0.02, 0.004, '#ff2a1a', { side: G.NEON }); }
+  b.box(0, 0.125, 0.251, 0.1, 0.02, 0.004, '#ffb22a', { side: G.NEON });
   return b.build();
 }

@@ -25,24 +25,40 @@ once Pages is turned on (Settings → Pages → Source: GitHub Actions).
 Useful URL flags: `?play=1` (skip title), `?posture=folded|unfolded|book|tabletop`,
 `?q=battery|balanced|ultra`, `?tod=0.8` (lock the time of day), `?speed=1..3`.
 
-### Gameplay
+### Gameplay — layered systems
 
-- **Zone** Residential / Commercial / Industrial land by dragging, and draw roads.
-- **Power** flows from turbines, solar farms and gas plants through roads and
-  buildings. Brownouts happen when demand exceeds supply.
-- **Water towers** (which need power) let lots grow past low density.
-- **Land value** rises with waterfront, parks, trees and services, and falls with
-  pollution and crime. It decides whether a lot becomes a house, an apartment
-  block or a tower.
-- **RCI demand**, monthly budget, tax sliders, happiness, crime, pollution,
-  and advisors that explain what the city needs.
-- **Milestones** (Hamlet → Megalopolis) unlock the gas plant, school, solar,
-  hospital and stadium.
-- 36 procedurally modelled zone buildings (3 zones × 3 densities × 4 variants)
-  plus 10 service buildings. Animated traffic, spinning turbines, smoke and
-  steam, construction pop-in, and a day/night cycle with lit windows, street
-  lights, neon and bloom.
-- Autosaves locally.
+Every system feeds the others, so one decision ripples through the city:
+
+| Layer | What it simulates | What you do about it |
+|---|---|---|
+| **Zoning & growth** | R/C/I lots grow through three densities. The cap depends on water, land value, education and city size. | Zone, then read the inspect card, which says exactly what a lot needs to grow |
+| **Power grid** | Plants feed connected components through roads and buildings. A short component has rolling brownouts. | Turbines, solar farms, gas plants, rooftop solar policy |
+| **Traffic & commutes** | Every household routes over the road graph to its nearest job. Load becomes congestion, commute minutes, slower cars and road pollution. | Streets vs **Avenues** (2.7× capacity, upgrade by dragging), **Bus Stops**, **Metro**, Free Transit policy |
+| **Workforce & education** | Workers split into low-skill and skilled by school and university coverage. Jobs have skill needs, which drive unemployment, vacancies and demand. | Schools, University, mixed zoning |
+| **Land value** | Waterfront, parks, trees and services add value. Pollution, crime, traffic, garbage, industry and abandonment subtract it. | Place parks and services, keep industry away from homes |
+| **Health, crime, garbage** | Coverage fields from clinics, hospitals and police. Garbage piles up when landfill capacity runs short. | Clinics, Hospital, Police, Landfill, Recycling Center |
+| **Fire** | Buildings can ignite (industry and abandoned buildings more often), fire spreads, stations put it out, and lost buildings leave rubble. | Fire stations, Smoke Detector Mandate, a Disasters toggle |
+| **Decline** | Distressed buildings (no power, unhappy, no route to work, garbage) get abandoned and recover once fixed. | Fix the root cause the advisors point to |
+| **Economy** | Wealth-scaled residential tax, C/I tax, transit fares and tourism, against road and service upkeep, policy costs and loan payments. | Tax sliders, department funding (50–150%), 9 ordinances, loans |
+| **Citizens & politics** | Per-household happiness with a factor breakdown, and a mayor approval rating with decaying modifiers. | Petitions (11 quest types with deadlines and rewards), 14 achievements |
+| **City feed** | Monthly headlines, resident posts, and an on-demand advisor briefing. | All generated text, see below |
+
+The Mayor's Desk has tabs for **Overview** (KPIs, demand, workforce, happiness
+factors, charts), **Budget** (taxes, department funding, ledger, loans),
+**Policy**, **Goals** (petitions and achievements), **Feed** (advisor briefing,
+advisors, news, resident posts) and **Map** (minimap, 10 data layers, camera and
+time of day).
+
+### Generative AI with Apple's Foundation Models
+
+`ios/` holds a native SwiftUI app that hosts the game in a WKWebView and adds a
+bridge to Apple's on-device **Foundation Models** framework (iOS 26+). It uses
+`@Generable` structs for headlines, resident posts, petition text and the advisor
+briefing (`ios/Skyfold/FoundationModelsBridge.swift`). Every request carries
+procedural fallback text. In a browser, on unsupported devices, or if the model
+declines a request, `src/ai.js` writes the text with a built-in grammar, so
+gameplay never depends on the model. The shell also enables 120 Hz
+(`CADisableMinimumFrameDurationOnPhone`) and native haptics. See `ios/README.md`.
 
 ### Built for the fold
 
@@ -52,7 +68,7 @@ Layout comes from the screen's shape and the reported hinge, not a model list
 | Posture | Detection | Layout |
 |---|---|---|
 | **Folded** (cover screen) | narrow phone aspect | compact HUD; bottom tool dock in portrait, left rail in landscape; the dashboard opens as a bottom sheet |
-| **Unfolded** (inner screen) | near-square, ≥560 px short side | grouped two-column tool rail; the **Mayor's Desk** (stats, budget, minimap, advisors) docks beside the city (landscape) or below it (portrait) |
+| **Unfolded** (inner screen, 1878×2670 px @ 430 ppi = 626×890 pt) | near-square, ≥560 pt short side | grouped two-column tool rail; the **Mayor's Desk** (stats, budget, minimap, advisors) docks beside the city (landscape) or below it (portrait) |
 | **Book** | Viewport Segments API reports side-by-side segments | city on one panel, desk on the other, nothing drawn across the hinge |
 | **Tabletop** | stacked segments (half-folded) | city on the top half, controls on the bottom half |
 
@@ -72,7 +88,9 @@ game/
   manifest.webmanifest, sw.js    PWA + offline cache
   src/config.js                  tuning tables (zones, services, costs, milestones)
   src/world.js                   tile grids, island generator, save/load
-  src/sim.js                     power/water networks, land value, growth, budget, advisors
+  src/sim.js                     networks, traffic routing, workforce, fields, fire, decline, economy
+  src/events.js                  petitions, achievements, approval, city feed
+  src/ai.js                      generative text: Foundation Models bridge + procedural writer
   src/input.js                   camera rig, touch gestures (pan/pinch/twist), mouse, keys
   src/ui.js                      HUD, tools, Mayor's Desk, inspect card, menus
   src/posture.js                 foldable posture detection
@@ -82,6 +100,10 @@ game/
   src/render/models.js           procedural building / prop library
   src/render/geo.js, textures.js mesh kit + canvas-painted textures
   vendor/three/                  Three.js r170 (MIT)
+ios/
+  project.yml                    XcodeGen spec (bundles ../game as app resources)
+  Skyfold/GameView.swift         WKWebView host, skyfold:// scheme, haptics
+  Skyfold/FoundationModelsBridge.swift  on-device LLM bridge (@Generable)
 ```
 
 ### Notes

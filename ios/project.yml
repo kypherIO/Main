@@ -1,0 +1,48 @@
+# Generate the Xcode project with XcodeGen:  brew install xcodegen && cd ios && xcodegen
+name: Skyfold
+options:
+  bundleIdPrefix: com.kypher
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Skyfold:
+    type: application
+    platform: iOS
+    sources:
+      - path: Skyfold
+      - path: ../game
+        type: folder
+        buildPhase: resources
+    info:
+      path: Skyfold/Info.plist
+      properties:
+        CFBundleDisplayName: Skyfold
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: false
+        UIRequiresFullScreen: false
+        CADisableMinimumFrameDurationOnPhone: true   # unlock 120 Hz ProMotion
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kypher.skyfold
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.simulation-games

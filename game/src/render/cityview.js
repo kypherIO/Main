@@ -1,14 +1,15 @@
 // CityView: turns World state into an instanced, animated 3D city.
 import * as THREE from 'three';
-import { MAP, N, K, ZONES, SERVICES, svcId, hash01, clamp } from '../config.js';
-import { createMaterials, ZONE_MODELS, serviceModel, carGeometry, treeGeometry, lampGeometry } from './models.js';
-import { roadTexture, detailNoiseTexture, waterNormalTexture, radialSprite, smokeSprite, cursorTexture, contactShadowTexture } from './textures.js';
+import { MAP, N, K, F, ZONES, SERVICES, svcId, hash01, clamp } from '../config.js';
+import { createMaterials, ZONE_MODELS, serviceModel, carGeometry, treeGeometry, lampGeometry, rubbleGeometry, busGeometry } from './models.js';
+import { roadTexture, detailNoiseTexture, waterNormalTexture, radialSprite, smokeSprite, cursorTexture, contactShadowTexture, zonePlateTexture } from './textures.js';
 
 const HALF = MAP / 2;
 const DIRV = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N E S W
 const ROT = [Math.PI, Math.PI / 2, 0, -Math.PI / 2];
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _e = new THREE.Euler(), _c = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
+const _white = new THREE.Color(1, 1, 1);
 
 export const tileWorld = (x, z) => [x - HALF + 0.5, z - HALF + 0.5];
 
@@ -80,7 +81,7 @@ export class CityView {
     this.buildTerrain();
     for (const o of this.svcObjs.values()) this.root.remove(o.obj);
     this.svcObjs.clear();
-    this.cars.length = 0;
+    this.cars.length = 0; this.buses.length = 0;
     this.anim.clear();
     Object.keys(this.dirty).forEach((k) => (this.dirty[k] = true));
   }
@@ -163,8 +164,8 @@ export class CityView {
   buildRoads() {
     const plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     this.roadPools = [];
-    for (let m = 0; m < 16; m++) {
-      const mat = new THREE.MeshStandardMaterial({ map: roadTexture(m), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    for (let m = 0; m < 32; m++) {
+      const mat = new THREE.MeshStandardMaterial({ map: roadTexture(m & 15, m >= 16), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
       this.roadPools.push(new InstPool(this.root, plane, mat, { cast: false, receive: true, cap: 64 }));
     }
     const lampGeo = lampGeometry();
@@ -190,7 +191,7 @@ export class CityView {
       const x = i % MAP, z = (i / MAP) | 0, [wx, wz] = tileWorld(x, z);
       const mask = this.roadMask(x, z);
       _m.makeTranslation(wx, 0.016, wz);
-      this.roadPools[mask].push(_m);
+      this.roadPools[mask + (w.level[i] ? 16 : 0)].push(_m);
       if ((x + z) % 2 === 0 && (mask === 5 || mask === 10)) {
         if (mask === 5) { _e.set(0, -Math.PI / 2, 0); _p.set(wx + 0.41, 0.016, wz); }
         else { _e.set(0, 0, 0); _p.set(wx, 0.016, wz - 0.41); }
@@ -220,12 +221,16 @@ export class CityView {
   rebuildBuildings() {
     const w = this.w, now = this.time;
     for (const p of this.buildingPools.values()) p.begin();
-    this.ao.begin();
+    this.ao.begin(); this.rubble.begin(); this.plates.begin();
     this.emitters = [];
+    this.fires = [];
     let animating = false;
     for (let i = 0; i < N; i++) {
-      const k = w.kind[i], L = w.level[i];
-      if (!(k === K.RES || k === K.COM || k === K.IND) || !L) continue;
+      const k = w.kind[i], L = w.level[i], fl = w.flags[i];
+      if (fl & F.RUBBLE) { const [rx, rz] = tileWorld(i % MAP, (i / MAP) | 0); _q.setFromAxisAngle(UP, hash01(i) * 6); _m.compose(_p.set(rx, 0, rz), _q, _s.set(1, 1, 1)); this.rubble.push(_m); continue; }
+      if (fl & F.BURNING) { const [fx, fz] = tileWorld(i % MAP, (i / MAP) | 0); this.fires.push([fx, fz, k === K.SERVICE ? SERVICES[svcId(w.svc[i])].size : 1]); }
+      if (!(k === K.RES || k === K.COM || k === K.IND)) continue;
+      if (!L) { const [px, pz] = tileWorld(i % MAP, (i / MAP) | 0); _m.makeTranslation(px, 0.022, pz); this.plates.push(_m, this.zoneCols[k]); continue; }
       const x = i % MAP, z = (i / MAP) | 0, [wx, wz] = tileWorld(x, z);
       const pool = this.poolFor(k, L, w.variant[i] & 3);
       let sy = 1;
@@ -237,13 +242,14 @@ export class CityView {
       _q.setFromAxisAngle(UP, ROT[w.rot[i]]);
       _m.compose(_p.set(wx, 0, wz), _q, _s.set(1, sy, 1));
       const h = hash01(i, 3);
-      _c.setHSL(h, 0.25, 0.85 + h * 0.1);
-      _c.lerp(new THREE.Color(1, 1, 1), 0.55);
+      if (fl & F.BURNING) _c.setRGB(0.32, 0.17, 0.1);
+      else if (fl & F.ABANDONED) _c.setRGB(0.3, 0.29, 0.29);
+      else { _c.setHSL(h, 0.25, 0.85 + h * 0.1); _c.lerp(_white, 0.55); }
       pool.push(_m, _c);
       const as = L === 1 ? 1.12 : 1.22;
       _m.compose(_p.set(wx, 0.02, wz), _q.identity(), _s.set(as, 1, as));
       this.ao.push(_m);
-      for (const e of pool.emitters) {
+      if (!(fl & F.ABANDONED)) for (const e of pool.emitters) {
         _p.set(e[0], e[1] * sy, e[2]).applyQuaternion(_q);
         this.emitters.push({ x: wx + _p.x, y: _p.y, z: wz + _p.z, steam: false, rate: 0.6 });
       }
@@ -254,7 +260,7 @@ export class CityView {
       _m.compose(_p.set(o.obj.position.x, 0.02, o.obj.position.z), _q.identity(), _s.set(sz, 1, sz));
       this.ao.push(_m);
     }
-    this.ao.end();
+    this.ao.end(); this.rubble.end(); this.plates.end();
     this.dirty.buildings = animating;
     for (const s of this.svcObjs.values()) for (const e of s.emitters) this.emitters.push(e);
   }
@@ -303,6 +309,13 @@ export class CityView {
     const aoMat = new THREE.MeshBasicMaterial({ map: contactShadowTexture(), transparent: true, depthWrite: false, color: '#000000', opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.ao = new InstPool(this.root, new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), aoMat, { cast: false, receive: false, cap: 256 });
     this.ao.setOrder(1);
+    this.rubble = new InstPool(this.root, rubbleGeometry(), this.mats.list, { cast: true, receive: true, cap: 32 });
+    const plateMat = new THREE.MeshBasicMaterial({ map: zonePlateTexture(), transparent: true, depthWrite: false, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    this.plates = new InstPool(this.root, new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2), plateMat, { cast: false, receive: false, color: true, cap: 128 });
+    this.plates.setOrder(1);
+    this.zoneCols = { 2: new THREE.Color('#5fd068'), 3: new THREE.Color('#4aa8ff'), 4: new THREE.Color('#ffc547') };
+    this.fireLights = [0, 1].map(() => { const l = new THREE.PointLight('#ff7a2a', 0, 5, 1.6); this.root.add(l); return l; });
+    this.fires = [];
     this.treePools = [null, new InstPool(this.root, treeGeometry(1), this.mats.list, { color: true, cap: 512 }), new InstPool(this.root, treeGeometry(2), this.mats.list, { color: true, cap: 512 })];
   }
   rebuildTrees() {
@@ -326,37 +339,42 @@ export class CityView {
     this.dirty.trees = false;
   }
 
-  // ------------------------------------------------------------ cars
+  // ------------------------------------------------------------ vehicles
   buildCars() {
     this.carPool = new InstPool(this.root, carGeometry(), this.mats.list, { color: true, cap: 128, receive: false });
+    this.busPool = new InstPool(this.root, busGeometry(), this.mats.list, { color: true, cap: 16, receive: false });
     this.carColors = ['#d63c3c', '#f2f2f2', '#2b2f36', '#3b6fd6', '#e8b93a', '#8a9aa8', '#2e8a5a', '#c7c7c7', '#7a3fb0'].map((c) => new THREE.Color(c));
-    this.cars = [];
-    this.carTarget = 0;
+    this.busColor = new THREE.Color('#f2b632');
+    this.cars = []; this.buses = [];
+    this.carTarget = 0; this.busTarget = 0;
   }
 
-  spawnCar() {
+  spawnVehicle(list, bus) {
     const w = this.w;
-    for (let tries = 0; tries < 20; tries++) {
+    for (let tries = 0; tries < 30; tries++) {
       const i = (Math.random() * N) | 0;
       if (w.kind[i] !== K.ROAD) continue;
+      if (!bus && Math.random() > 0.12 + w.traffic[i] / 120) continue; // busy roads get more cars
       const x = i % MAP, z = (i / MAP) | 0, mask = this.roadMask(x, z);
       const dirs = [0, 1, 2, 3].filter((d) => mask & (1 << d));
       if (!dirs.length) return;
       const out = dirs[(Math.random() * dirs.length) | 0];
-      this.cars.push({ x, z, inD: out, outD: out, t: Math.random(), v: 0.6 + Math.random() * 0.5, c: this.carColors[(Math.random() * this.carColors.length) | 0] });
+      list.push({ x, z, inD: out, outD: out, t: Math.random(), v: (bus ? 0.45 : 0.6) + Math.random() * 0.45, c: bus ? this.busColor : this.carColors[(Math.random() * this.carColors.length) | 0] });
       return;
     }
   }
 
-  updateCars(dt, speed) {
+  updateVehicles(list, pool, target, dt, speed, bus) {
     const w = this.w;
-    while (this.cars.length < this.carTarget) { const n = this.cars.length; this.spawnCar(); if (this.cars.length === n) break; }
-    if (this.cars.length > this.carTarget) this.cars.length = this.carTarget;
+    let guard = 0;
+    while (list.length < target && guard++ < 6) this.spawnVehicle(list, bus);
+    if (list.length > target) list.length = target;
     const move = speed > 0 ? dt * Math.sqrt(speed) : 0;
-    this.carPool.begin();
-    for (let k = this.cars.length - 1; k >= 0; k--) {
-      const c = this.cars[k];
-      c.t += c.v * move;
+    pool.begin();
+    for (let k = list.length - 1; k >= 0; k--) {
+      const c = list[k];
+      const jam = w.traffic[w.idx(c.x, c.z)];
+      c.t += c.v * move / (1 + Math.max(0, jam - 70) / 45);
       while (c.t >= 1) {
         c.t -= 1;
         const nx = c.x + DIRV[c.outD][0], nz = c.z + DIRV[c.outD][1];
@@ -365,10 +383,9 @@ export class CityView {
         const mask = this.roadMask(nx, nz), back = (c.inD + 2) % 4;
         let opts = [0, 1, 2, 3].filter((d) => (mask & (1 << d)) && d !== back);
         if (!opts.length) opts = [back];
-        // prefer straight
         c.outD = opts.includes(c.inD) && Math.random() < 0.6 ? c.inD : opts[(Math.random() * opts.length) | 0];
       }
-      if (c.dead || w.kind[w.idx(c.x, c.z)] !== K.ROAD) { this.cars.splice(k, 1); continue; }
+      if (c.dead || w.kind[w.idx(c.x, c.z)] !== K.ROAD) { list.splice(k, 1); continue; }
       const [cx, cz] = tileWorld(c.x, c.z);
       const ex = cx - DIRV[c.inD][0] * 0.5, ez = cz - DIRV[c.inD][1] * 0.5;
       const xx = cx + DIRV[c.outD][0] * 0.5, xz = cz + DIRV[c.outD][1] * 0.5;
@@ -376,12 +393,13 @@ export class CityView {
       let px = u * u * ex + 2 * u * t * cx + t * t * xx, pz = u * u * ez + 2 * u * t * cz + t * t * xz;
       let tx = 2 * u * (cx - ex) + 2 * t * (xx - cx), tz = 2 * u * (cz - ez) + 2 * t * (xz - cz);
       const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
-      px += -tz * 0.13; pz += tx * 0.13;
+      const lane = w.level[w.idx(c.x, c.z)] ? 0.27 : 0.13;
+      px += -tz * lane; pz += tx * lane;
       _q.setFromAxisAngle(UP, Math.atan2(tx, tz));
       _m.compose(_p.set(px, 0.018, pz), _q, _s.set(1, 1, 1));
-      this.carPool.push(_m, c.c);
+      pool.push(_m, c.c);
     }
-    this.carPool.end();
+    pool.end();
   }
 
   // ------------------------------------------------------------ particles
@@ -425,6 +443,16 @@ export class CityView {
       }
       if (this.emitAcc > 1) this.emitAcc = 0;
     }
+    for (const [fx, fz, size] of this.fires) {
+      const n = Math.random() < dt * 40 ? 1 + size : 0;
+      for (let k = 0; k < n; k++) {
+        if (this.parts.length >= this.pMax) break;
+        const flame = Math.random() < 0.6;
+        this.parts.push(flame
+          ? { x: fx + (Math.random() - 0.5) * 0.5 * size, y: 0.1 + Math.random() * 0.3, z: fz + (Math.random() - 0.5) * 0.5 * size, vx: (Math.random() - 0.5) * 0.1, vy: 0.7 + Math.random() * 0.5, vz: (Math.random() - 0.5) * 0.1, life: 0, max: 0.5 + Math.random() * 0.4, s0: 0.55, s1: 0.1, r: 4.0, g: 1.6, b: 0.35, a: 0.95 }
+          : { x: fx, y: 0.5, z: fz, vx: 0.12, vy: 0.5, vz: 0.04, life: 0, max: 3.5, s0: 0.3, s1: 1.6, r: 0.18, g: 0.16, b: 0.15, a: 0.55 });
+      }
+    }
     const pos = this.points.geometry.attributes.position.array, col = this.points.geometry.attributes.pcolor.array, siz = this.points.geometry.attributes.size.array;
     const night = this.r3d.night, light = 1 - night * 0.7;
     let n = 0;
@@ -435,7 +463,8 @@ export class CityView {
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.vy *= 0.995;
       const f = p.life / p.max;
       pos[n * 3] = p.x; pos[n * 3 + 1] = p.y; pos[n * 3 + 2] = p.z;
-      col[n * 4] = p.r * light; col[n * 4 + 1] = p.g * light; col[n * 4 + 2] = p.b * light; col[n * 4 + 3] = p.a * Math.min(1, f * 6) * (1 - f);
+      const lt = p.r > 1.5 ? 1 : light;
+      col[n * 4] = p.r * lt; col[n * 4 + 1] = p.g * lt; col[n * 4 + 2] = p.b * lt; col[n * 4 + 3] = p.a * Math.min(1, f * 6) * (1 - f);
       siz[n] = p.s0 + (p.s1 - p.s0) * f;
       n++;
     }
@@ -463,13 +492,20 @@ export class CityView {
     const w = this.w, d = this.ovData, mode = this.overlay;
     this.ovMesh.visible = mode !== 'none';
     this.dirty.overlay = false;
+    const discrete = ['traffic', 'power', 'water', 'happy'].includes(mode) ? THREE.NearestFilter : THREE.LinearFilter;
+    if (this.ovTex.magFilter !== discrete) { this.ovTex.magFilter = discrete; this.ovTex.minFilter = discrete; this.ovTex.needsUpdate = true; }
+    this.ovMesh.material.opacity = mode === 'traffic' ? 0.95 : 0.8;
     if (mode === 'none') return;
     for (let z = 0; z < MAP; z++) for (let x = 0; x < MAP; x++) {
       const i = z * MAP + x, o = ((MAP - 1 - z) * MAP + x) * 4;
       let r = 0, g = 0, b = 0, a = 0;
       const dev = w.kind[i] !== K.EMPTY;
       if (!w.terrain[i]) {
-        if (mode === 'power') { if (dev && w.kind[i] !== K.ROAD) { if (w.power[i]) { r = 60; g = 230; b = 120; } else { r = 255; g = 60; b = 60; } a = 200; } }
+        if (mode === 'traffic') { if (w.kind[i] === K.ROAD) { const v = clamp(w.traffic[i] / 130, 0, 1); r = 60 + 195 * Math.min(1, v * 2); g = 220 - 180 * Math.max(0, v * 2 - 1); b = 70; a = 235; } }
+        else if (mode === 'happy') { if (w.kind[i] === K.RES && w.level[i]) { const v = w.happy[i] / 100; r = 255 * (1 - v) + 40 * v; g = 70 + 185 * v; b = 90 + 60 * v; a = 210; } }
+        else if (mode === 'edu') { const v = w.cov.edu[i] / 255; r = 120; g = 90 + 60 * v; b = 255; a = v * 220; }
+        else if (mode === 'garbage') { const v = w.garbage[i] / 70; r = 150; g = 110; b = 40; a = clamp(v, 0, 1) * 235; if (!dev && w.cov.garbage[i]) { r = 90; g = 200; b = 120; a = 40; } }
+        else if (mode === 'power') { if (dev && w.kind[i] !== K.ROAD) { if (w.power[i]) { r = 60; g = 230; b = 120; } else { r = 255; g = 60; b = 60; } a = 200; } }
         else if (mode === 'water') { if (w.water[i]) { r = 60; g = 160; b = 255; a = 170; } else if (dev && w.kind[i] !== K.ROAD) { r = 255; g = 120; b = 60; a = 150; } }
         else if (mode === 'lv') { const v = w.lv[i] / 100; r = 255 * (1 - v) + 40 * v; g = 80 + 175 * v; b = 60; a = 160; }
         else if (mode === 'pollution') { const v = w.pollution[i] / 60; r = 150; g = 90; b = 40; a = clamp(v, 0, 1) * 230; }
@@ -531,6 +567,11 @@ export class CityView {
   onTiles(list) {
     this.dirty.roads = this.dirty.buildings = this.dirty.trees = this.dirty.services = this.dirty.overlay = true;
   }
+  onFire(i, state) {
+    const x = i % MAP, z = (i / MAP) | 0, [wx, wz] = tileWorld(x, z);
+    if (state !== 'start') this.spawnDust(wx, wz, 1);
+    this.dirty.buildings = true; this.dirty.overlay = true;
+  }
   onGrow(i, up) {
     const x = i % MAP, z = (i / MAP) | 0, [wx, wz] = tileWorld(x, z);
     if (up) this.anim.set(i, this.time);
@@ -558,12 +599,21 @@ export class CityView {
       if (o.blades) o.blades.rotation.z += dt * (1.2 + (speed > 0 ? 0.6 : 0));
     }
     this.poolMat.opacity = night * 0.9;
+    this.fireLights.forEach((l, k) => {
+      const f = this.fires[k];
+      if (f) { l.position.set(f[0], 0.6, f[1]); l.intensity = (2.2 + Math.sin(this.time * 23 + k) * 0.5 + Math.sin(this.time * 37) * 0.4) * (0.5 + night); }
+      else l.intensity = 0;
+    });
     this.pools.mesh.visible = night > 0.02 && this.pools.n > 0;
     this.waterNormal.offset.x = (this.time * 0.004) % 1;
     this.waterNormal.offset.y = (this.time * 0.0025) % 1;
     const roads = stats.roads || 0;
-    this.carTarget = Math.min(260, Math.floor(roads * 0.5), Math.floor(stats.pop / 16 + stats.jobs / 24) + Math.min(6, roads >> 3));
-    this.updateCars(dt, speed);
+    this.carTarget = Math.min(320, Math.floor(roads * 0.6), Math.floor((stats.trips || 0) / 9 + stats.jobs / 40) + Math.min(6, roads >> 3));
+    let stations = 0;
+    for (const o of this.svcObjs.values()) if (o.id === 'bus' || o.id === 'metro') stations++;
+    this.busTarget = Math.min(30, stations * 2);
+    this.updateVehicles(this.cars, this.carPool, this.carTarget, dt, speed, false);
+    this.updateVehicles(this.buses, this.busPool, this.busTarget, dt, speed, true);
     this.updateParticles(dt, speed);
     if (this.cursor.visible) this.cursor.material.opacity = 0.75 + Math.sin(this.time * 6) * 0.25;
   }
