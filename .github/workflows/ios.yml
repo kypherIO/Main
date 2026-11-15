@@ -20,6 +20,9 @@ jobs:
       - name: Test simulation package
         working-directory: ios/Packages/SkyfoldCore
         run: swift test
+      - name: Stress test (optimized build, shipping performance)
+        working-directory: ios/Packages/SkyfoldCore
+        run: swift test -c release -Xswiftc -enable-testing --filter StressTests 2>&1 | grep -E "STRESS|measured|Executed|error|failed" 
   xcode:
     name: Xcode build (iOS)
     runs-on: macos-26
