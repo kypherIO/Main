@@ -191,7 +191,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             if gpu > 0 { DispatchQueue.main.async { game?.perf.gpuMs = (game?.perf.gpuMs ?? 0) * 0.9 + gpu * 0.1 } }
         }
 
-        let scene = game.scene
+        guard let scene = game.scene else { cb.commit(); return }   // completion handler signals the semaphore
         let L = game.lighting
         var U = makeUniforms(game: game, lighting: L)
 

@@ -74,7 +74,7 @@ struct CitySnapshot: Sendable {
     }
 }
 
-struct CityStatsTool: Tool {
+struct CityStatsTool: FoundationModels.Tool {
     let name = "cityStats"
     let description = "Look up live statistics for the player's city. Topics: economy, people, traffic, services, environment, advisors."
     let snapshot: CitySnapshot

@@ -9,7 +9,6 @@ final class StressTests: XCTestCase {
     private func maxDensityCity(seed: UInt32 = 31337) -> Sim {
         let w = World.generate(seed: seed, name: "Stressville")
         let sim = Sim(world: w)
-        sim.callbackQueue = nil
         var s: UInt32 = 99
         sim.rng = { s = s &* 1664525 &+ 1013904223; return Double(s >> 8) / 16777216 }
         w.funds = 1e9; w.peakPop = 1_000_000
@@ -71,7 +70,6 @@ final class StressTests: XCTestCase {
         // Thousands of random player actions interleaved with simulation: must never crash or corrupt state.
         let w = World.generate(seed: 2024, name: "Chaos")
         let sim = Sim(world: w)
-        sim.callbackQueue = nil
         var s: UInt32 = 7
         func r() -> Double { s = s &* 1664525 &+ 1013904223; return Double(s >> 8) / 16777216 }
         sim.rng = { r() }
@@ -105,7 +103,6 @@ final class StressTests: XCTestCase {
     func testBankruptcyAndRecovery() {
         let w = World.generate(seed: 77, name: "Broke")
         let sim = Sim(world: w)
-        sim.callbackQueue = nil
         w.funds = 100
         for d in Dept.allCases { w.budget[d] = 150 }
         for _ in 0..<720 { sim.step() }
