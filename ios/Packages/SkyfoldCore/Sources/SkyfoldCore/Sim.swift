@@ -530,12 +530,15 @@ public final class Sim: @unchecked Sendable {
         let zs = Int((Double(z0) + c - R).rounded(.down)), ze = Int((Double(z0) + c + R).rounded(.up))
         let xs = Int((Double(x0) + c - R).rounded(.down)), xe = Int((Double(x0) + c + R).rounded(.up))
         if zs > ze || xs > xe { return }
-        for z in zs...ze {
-            if z < 0 || z >= MAP { continue }
-            for x in xs...xe {
-                if x < 0 || x >= MAP { continue }
-                let d = hypot(Double(x - x0) - c, Double(z - z0) - c)
-                if d <= R { fn(z * MAP + x, 1 - d / R) }
+        let r2 = R * R, invR = 1 / R
+        for z in max(0, zs)...min(MAP - 1, max(0, ze)) {
+            let dz = Double(z - z0) - c, dz2 = dz * dz
+            if dz2 > r2 { continue }
+            let row = z * MAP
+            for x in max(0, xs)...min(MAP - 1, max(0, xe)) {
+                let dx = Double(x - x0) - c
+                let d2 = dx * dx + dz2
+                if d2 <= r2 { fn(row + x, 1 - d2.squareRoot() * invR) }
             }
         }
     }
@@ -647,25 +650,34 @@ public final class Sim: @unchecked Sendable {
         let crimeMul = (has(.watch) ? 0.8 : 1.0) * (has(.curfew) ? 0.85 : 1.0)
         let unemp = stats.unemployment
         let highrise = has(.highrise)
+        // Summed-area tables → O(1) neighbourhood sums (was a 5×5 scan per tile).
+        let S = MAP + 1
+        var satTree = [Int32](repeating: 0, count: S * S), satDens = satTree, satAband = satTree, satInd = satTree
+        for z in 0..<MAP {
+            for x in 0..<MAP {
+                let i = z * MAP + x, k = w.kind[i], L = Int32(w.level[i]), o = (z + 1) * S + (x + 1)
+                let up = o - S, left = o - 1, diag = o - S - 1
+                satTree[o] = (w.tree[i] != 0 ? 1 : 0) + satTree[up] + satTree[left] - satTree[diag]
+                satDens[o] = ((k == K.res || k == K.com) && L != 0 ? L : 0) + satDens[up] + satDens[left] - satDens[diag]
+                satAband[o] = ((w.flags[i] & F.abandoned) != 0 ? 1 : 0) + satAband[up] + satAband[left] - satAband[diag]
+                satInd[o] = (k == K.ind && L != 0 ? 1 : 0) + satInd[up] + satInd[left] - satInd[diag]
+            }
+        }
+        func boxSum(_ t: [Int32], _ x: Int, _ z: Int, _ r: Int) -> Int {
+            let x0 = max(0, x - r), z0 = max(0, z - r), x1 = min(MAP - 1, x + r) + 1, z1 = min(MAP - 1, z + r) + 1
+            return Int(t[z1 * S + x1] - t[z0 * S + x1] - t[z1 * S + x0] + t[z0 * S + x0])
+        }
         var polSum = 0.0, crimeSum = 0.0, healthSum = 0.0, eduSum = 0.0
         var cnt = 0, resN = 0
         for i in 0..<N {
             let x = i % MAP, z = i / MAP
-            var trees = 0, dens = 0, nearInd = 0, aband = 0, traf = 0
-            for oz in -2...2 {
-                let nz = z + oz
-                if nz < 0 || nz >= MAP { continue }
-                for ox in -2...2 {
-                    let nx = x + ox
-                    if nx < 0 || nx >= MAP { continue }
+            let trees = boxSum(satTree, x, z, 2), dens = boxSum(satDens, x, z, 2)
+            let aband = boxSum(satAband, x, z, 2), nearInd = boxSum(satInd, x, z, 1)
+            var traf = 0
+            for nz in max(0, z - 1)...min(MAP - 1, z + 1) {
+                for nx in max(0, x - 1)...min(MAP - 1, x + 1) {
                     let j = nz * MAP + nx
-                    if w.tree[j] != 0 { trees += 1 }
-                    let kj = w.kind[j]
-                    let near1 = ox >= -1 && ox <= 1 && oz >= -1 && oz <= 1
-                    if (kj == K.res || kj == K.com) && w.level[j] != 0 { dens += Int(w.level[j]) }
-                    if (w.flags[j] & F.abandoned) != 0 { aband += 1 }
-                    if kj == K.ind && w.level[j] != 0 && near1 { nearInd += 1 }
-                    if kj == K.road && near1 { traf = max(traf, Int(w.traffic[j])) }
+                    if w.kind[j] == K.road && Int(w.traffic[j]) > traf { traf = Int(w.traffic[j]) }
                 }
             }
             let ki = w.kind[i]
@@ -1036,6 +1048,9 @@ public final class Sim: @unchecked Sendable {
         if netDirty { computeNetworks() }
         if fieldsDirty { computeTraffic(); computeFields() }
         w.day += 1
+        // Stagger the heavy passes on different days so no single tick stacks them.
+        let phase = w.day % 10
+        if phase == 3 { computeTraffic() } else if phase == 7 { computeFields() }
         var changed: [Int] = []
         var i = slice
         while i < N {
@@ -1050,7 +1065,6 @@ public final class Sim: @unchecked Sendable {
         slice = (slice + 1) % 6
         if !changed.isEmpty { recount(); delegate?.simTilesChanged(changed) }
         if w.day % 5 == 0 { recount(); computeDemand() }
-        if w.day % 10 == 0 { fieldsDirty = true }
         if w.day % DAYS_PER_MONTH == 0 { monthly() }
     }
 
@@ -1070,7 +1084,10 @@ public final class Sim: @unchecked Sendable {
 
     func monthly() {
         let w = world
-        computeNetworks(); computeTraffic(); computeFields(); recount(); computeDemand()
+        // Fields/traffic are kept fresh by the staggered schedule in step(); only
+        // refresh what player actions invalidated.
+        if netDirty { computeNetworks() }
+        recount(); computeDemand()
         stats.tourists = tourism()
         // income — residents pay more in high land value areas
         var wealth = 0.0

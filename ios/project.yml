@@ -25,20 +25,6 @@ targets:
       - path: Skyfold
     dependencies:
       - package: SkyfoldCore
-      - sdk: Metal.framework
-      - sdk: MetalKit.framework
-      - sdk: MetalFX.framework
-      - sdk: MetalPerformanceShaders.framework
-      - sdk: GameKit.framework
-      - sdk: GameController.framework
-      - sdk: CoreHaptics.framework
-      - sdk: AVFAudio.framework
-      - sdk: RealityKit.framework
-      - sdk: ARKit.framework
-      - sdk: AppIntents.framework
-      - sdk: FoundationModels.framework
-      - sdk: ImagePlayground.framework
-      - sdk: NaturalLanguage.framework
     entitlements:
       path: Skyfold/Skyfold.entitlements
       properties:

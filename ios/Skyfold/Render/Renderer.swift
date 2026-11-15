@@ -1,5 +1,7 @@
 import MetalKit
+#if canImport(MetalFX)
 import MetalFX
+#endif
 import MetalPerformanceShaders
 import simd
 import SkyfoldCore
@@ -44,7 +46,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var shadowMap: MTLTexture?
     private var black: MTLTexture!
     private(set) var overlayTexture: MTLTexture!
+    #if canImport(MetalFX)
     private var scaler: (any MTLFXSpatialScaler)?
+    #else
+    private var scaler: AnyObject?
+    #endif
     private var blur: MPSImageGaussianBlur?
     private var renderSize = SIMD2<Int>(1, 1), drawableSize = SIMD2<Int>(1, 1)
     private var builtFor: (Quality, SIMD2<Int>)?
@@ -129,6 +135,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         bloomB = makeTexture(.rgba16Float, w / 2, h / 2, [.renderTarget, .shaderRead, .shaderWrite])
         shadowMap = makeTexture(.depth32Float, quality.shadowSize, quality.shadowSize, [.renderTarget, .shaderRead])
         scaler = nil; ldr = nil; upscaled = nil
+#if canImport(MetalFX)
         if s < 0.99 && MTLFXSpatialScalerDescriptor.supportsDevice(device) {
             let d = MTLFXSpatialScalerDescriptor()
             d.inputWidth = w; d.inputHeight = h
@@ -142,6 +149,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                 upscaled = makeTexture(.bgra8Unorm_srgb, drawable.x, drawable.y, sc.outputTextureUsage)
             }
         }
+#endif
         builtFor = (quality, drawable)
     }
 
@@ -177,7 +185,11 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         inflight.wait()
         guard let cb = queue.makeCommandBuffer() else { inflight.signal(); return }
-        cb.addCompletedHandler { [weak self] _ in self?.inflight.signal() }
+        cb.addCompletedHandler { [weak self, weak game] buf in
+            self?.inflight.signal()
+            let gpu = (buf.gpuEndTime - buf.gpuStartTime) * 1000
+            if gpu > 0 { DispatchQueue.main.async { game?.perf.gpuMs = (game?.perf.gpuMs ?? 0) * 0.9 + gpu * 0.1 } }
+        }
 
         let scene = game.scene
         let L = game.lighting
@@ -219,6 +231,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             if isT { transparent.append(d) } else { opaque.append(d) }
             off += inst.count * stride
         }
+        game.perf.frameMs = frameTime * 1000
+        game.perf.draws = opaque.count + transparent.count + opaque.filter { $0.shadow }.count + 3
+        game.perf.instances = total
+        game.perf.renderSize = "\(renderSize.x)×\(renderSize.y)→\(drawableSize.x)×\(drawableSize.y)\(scaler != nil ? " MetalFX" : "")"
         let parts = scene.particleData(night: L.night)
         let pb = buffer(&particleBuffers, max(1, parts.count) * MemoryLayout<ParticleData>.stride)
         if !parts.isEmpty { parts.withUnsafeBytes { raw in pb.contents().copyMemory(from: raw.baseAddress!, byteCount: raw.count) } }
@@ -325,6 +341,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             enc.endEncoding()
         }
+#if canImport(MetalFX)
         if let scaler, let ldr, let upscaled {
             scaler.colorTexture = ldr
             scaler.outputTexture = upscaled
@@ -334,6 +351,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                 blit.endEncoding()
             }
         }
+#endif
         cb.present(drawable)
         cb.commit()
         frame = (frame + 1) % 3

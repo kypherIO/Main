@@ -1,4 +1,5 @@
 import SwiftUI
+import QuartzCore
 import Observation
 import GameController
 import simd
@@ -54,6 +55,9 @@ final class GameModel {
     @ObservationIgnored private var drag: (a: (Int, Int), b: (Int, Int))?
     @ObservationIgnored private var ghostAt: (Int, Int)?
     @ObservationIgnored private var lastSpeed = 1
+    @ObservationIgnored var perf = PerfStats()
+    var showPerf = ProcessInfo.processInfo.arguments.contains("-perf")
+    var perfText = ""
 
     // Apple services
     @ObservationIgnored let gameCenter = GameCenterService()
@@ -79,6 +83,9 @@ final class GameModel {
         audio.muted = !s.sound
         rig.dist = 46; rig.orbit = 0.045; rig.yaw = 0.6
         GameControllerSupport.start()
+        if ProcessInfo.processInfo.arguments.contains("-stress") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.runStressTest() }
+        }
     }
 
     func attach(device: MTLDevice) {
@@ -133,9 +140,15 @@ final class GameModel {
         guard let scene else { return }
         if playing && speed > 0 {
             acc += Double(dt) * SPEEDS[speed]
+            // Frame budget: never spend more than ~4 ms of a 8.3 ms (120 Hz) frame on simulation.
+            let t0 = CACurrentMediaTime()
             var steps = 0
-            while acc >= SIM_DAY_SECONDS && steps < 10 { sim.step(); acc -= SIM_DAY_SECONDS; steps += 1 }
-            if steps >= 10 { acc = 0 }
+            while acc >= SIM_DAY_SECONDS && steps < 10 {
+                sim.step(); acc -= SIM_DAY_SECONDS; steps += 1
+                if CACurrentMediaTime() - t0 > 0.004 { break }
+            }
+            acc = min(acc, SIM_DAY_SECONDS * 8)   // drop backlog rather than spiral
+            if steps > 0 { perf.simMs = perf.simMs * 0.9 + (CACurrentMediaTime() - t0) * 1000 / Double(steps) * 0.1 }
         }
         switch timeMode {
         case .auto: tod = (tod + dt / 480 * (speed > 0 || !playing ? max(1, Float(SPEEDS[speed]) * 0.6) : 0.15)).truncatingRemainder(dividingBy: 1)
@@ -150,9 +163,54 @@ final class GameModel {
         scene.update(dt: dt, speed: playing ? speed : 1, night: lighting.night, stats: sim.stats)
         audio.update(listener: rig.position, target: rig.target, pop: sim.stats.pop, fires: scene.fires)
         hudT += dt
-        if hudT > 0.25 { hudT = 0; hudTick &+= 1 }
+        if hudT > 0.25 {
+            hudT = 0; hudTick &+= 1
+            if showPerf {
+                perf.vehicles = scene.vehicleBatch.instances.count + scene.busBatch.instances.count
+                perf.particles = scene.particles.count
+                perfText = perf.summary
+            }
+        }
         saveT += dt
         if saveT > 30 && playing { saveT = 0; save() }
+    }
+
+    // MARK: stress test
+    /// Builds a maximum-density city (every buildable tile developed, avenue grid,
+    /// 250+ services, all policies) and runs it at top speed with fires — for
+    /// profiling on device with the performance overlay.
+    func runStressTest() {
+        let w = World.generate(seed: 31337, name: "Stress Test")
+        let s = Sim(world: w)
+        s.writer = intelligence.writer
+        w.funds = 1e9; w.peakPop = 1_000_000
+        var roads: [(Int, Int)] = []
+        for z in 1..<(MAP - 1) { for x in 1..<(MAP - 1) where w.terrain[w.idx(x, z)] == 0 && (x % 4 == 0 || z % 4 == 0) { roads.append((x, z)) } }
+        _ = s.buildRoads(roads, cls: 1)
+        let ids: [ServiceID] = [.gas, .tower, .landfill, .police, .fire, .clinic, .school, .bus, .metro, .park, .hospital, .university, .recycling]
+        var n = 0
+        for z in stride(from: 1, to: MAP - 1, by: 4) { for x in stride(from: 1, to: MAP - 1, by: 4) {
+            let id = ids[n % ids.count]; n += 1
+            if s.canPlaceService(x, z, id).ok { _ = s.placeService(x, z, id) }
+        } }
+        let kinds: [Kind] = [.res, .res, .com, .ind]
+        for i in 0..<N where w.terrain[i] == 0 && w.kind[i] == Kind.empty.rawValue {
+            let (x, z) = w.xz(i)
+            _ = s.zone(TileRect(x0: x, x1: x, z0: z, z1: z), kind: kinds[(x * 7 + z * 3) % 4])
+        }
+        for p in PolicyID.allCases { s.setPolicy(p, on: true) }
+        for _ in 0..<720 { s.step() }   // grow to full density
+        world = w; sim = s; sim.delegate = self
+        sim.refreshAll()
+        scene?.setWorld(w)
+        settings.disasters = true
+        if !playing { playing = true; gameCenter.authenticate(); audio.start() }
+        rig.orbit = 0; rig.flyTo(0, 0, dist: 70)
+        showPerf = true
+        setSpeed(3)
+        var lit = 0
+        for i in stride(from: 97, to: N, by: 331) where lit < 6 && Kind(rawValue: w.kind[i])?.isZone == true && w.level[i] > 0 { sim.ignite(i); lit += 1 }
+        toast("Stress test: \(sim.stats.pop.formatted()) residents, \(n) services, fires started", .milestone)
     }
 
     // MARK: controls
@@ -444,4 +502,20 @@ extension GameModel: SimDelegate {
     func simAchievement(_ id: String) { onMain { self.gameCenter.unlock(achievement: id) } }
 
     private func onMain(_ f: @escaping () -> Void) { if Thread.isMainThread { f() } else { DispatchQueue.main.async(execute: f) } }
+}
+
+/// Live performance counters shown by the stress-test overlay.
+struct PerfStats {
+    var frameMs: Double = 16.7
+    var gpuMs: Double = 0
+    var simMs: Double = 0
+    var draws = 0
+    var instances = 0
+    var particles = 0
+    var vehicles = 0
+    var renderSize = "—"
+    var summary: String {
+        String(format: "%.0f fps · frame %.1f ms · GPU %.1f ms · sim %.2f ms/day\n%d draws · %d instances · %d particles · %d vehicles · %@",
+               1000 / max(0.1, frameMs), frameMs, gpuMs, simMs, draws, instances, particles, vehicles, renderSize)
+    }
 }

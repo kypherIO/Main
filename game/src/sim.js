@@ -345,10 +345,15 @@ export class Sim {
     for (let i = 0; i < N; i++) if (w.kind[i] === K.SERVICE && w.root[i] === i && !(w.flags[i] & F.RUBBLE)) services.push(i);
     const radial = (i, size, R, fn) => {
       const [x0, z0] = w.xz(i), c = (size - 1) / 2;
-      for (let z = Math.floor(z0 + c - R); z <= Math.ceil(z0 + c + R); z++) for (let x = Math.floor(x0 + c - R); x <= Math.ceil(x0 + c + R); x++) {
-        if (!w.inb(x, z)) continue;
-        const d = Math.hypot(x - x0 - c, z - z0 - c);
-        if (d <= R) fn(z * MAP + x, 1 - d / R);
+      const r2 = R * R, zs = Math.max(0, Math.floor(z0 + c - R)), ze = Math.min(MAP - 1, Math.ceil(z0 + c + R));
+      const xs = Math.max(0, Math.floor(x0 + c - R)), xe = Math.min(MAP - 1, Math.ceil(x0 + c + R));
+      for (let z = zs; z <= ze; z++) {
+        const dz = z - z0 - c, dz2 = dz * dz;
+        if (dz2 > r2) continue;
+        for (let x = xs; x <= xe; x++) {
+          const dx = x - x0 - c, d2 = dx * dx + dz2;
+          if (d2 <= r2) fn(z * MAP + x, 1 - Math.sqrt(d2) / R);
+        }
       }
     };
     let garbageCap = 0;
@@ -394,22 +399,32 @@ export class Sim {
     }
     this.stats.avgGarbage = gN ? gSum / gN : 0;
 
+    // summed-area tables → O(1) neighbourhood sums
+    const S = MAP + 1, satTree = new Int32Array(S * S), satDens = new Int32Array(S * S), satAband = new Int32Array(S * S), satInd = new Int32Array(S * S);
+    for (let z = 0; z < MAP; z++) for (let x = 0; x < MAP; x++) {
+      const i = z * MAP + x, k = w.kind[i], L = w.level[i], o = (z + 1) * S + (x + 1);
+      const up = o - S, left = o - 1, diag = o - S - 1;
+      satTree[o] = (w.tree[i] ? 1 : 0) + satTree[up] + satTree[left] - satTree[diag];
+      satDens[o] = ((k === K.RES || k === K.COM) && L ? L : 0) + satDens[up] + satDens[left] - satDens[diag];
+      satAband[o] = (w.flags[i] & F.ABANDONED ? 1 : 0) + satAband[up] + satAband[left] - satAband[diag];
+      satInd[o] = (k === K.IND && L ? 1 : 0) + satInd[up] + satInd[left] - satInd[diag];
+    }
+    const boxSum = (t, x, z, r) => {
+      const x0 = Math.max(0, x - r), z0 = Math.max(0, z - r), x1 = Math.min(MAP - 1, x + r) + 1, z1 = Math.min(MAP - 1, z + r) + 1;
+      return t[z1 * S + x1] - t[z0 * S + x1] - t[z1 * S + x0] + t[z0 * S + x0];
+    };
     const trafficPol = Math.min(10, this.stats.pop / 1500);
     const crimeMul = (this.has('watch') ? 0.8 : 1) * (this.has('curfew') ? 0.85 : 1);
     const unemp = this.stats.unemployment;
     let polSum = 0, crimeSum = 0, healthSum = 0, eduSum = 0, cnt = 0, resN = 0;
     for (let i = 0; i < N; i++) {
       const [x, z] = w.xz(i);
-      let trees = 0, dens = 0, nearInd = 0, aband = 0, traf = 0;
-      for (let oz = -2; oz <= 2; oz++) for (let ox = -2; ox <= 2; ox++) {
-        const nx = x + ox, nz = z + oz; if (!w.inb(nx, nz)) continue;
+      const trees = boxSum(satTree, x, z, 2), dens = boxSum(satDens, x, z, 2), aband = boxSum(satAband, x, z, 2), nearInd = boxSum(satInd, x, z, 1);
+      let traf = 0;
+      for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+        const nx = x + ox, nz = z + oz; if (nx < 0 || nz < 0 || nx >= MAP || nz >= MAP) continue;
         const j = nz * MAP + nx;
-        if (w.tree[j]) trees++;
-        const k = w.kind[j];
-        if ((k === K.RES || k === K.COM) && w.level[j]) dens += w.level[j];
-        if (w.flags[j] & F.ABANDONED) aband++;
-        if (k === K.IND && w.level[j] && Math.abs(ox) <= 1 && Math.abs(oz) <= 1) nearInd++;
-        if (k === K.ROAD && Math.abs(ox) <= 1 && Math.abs(oz) <= 1) traf = Math.max(traf, w.traffic[j]);
+        if (w.kind[j] === K.ROAD && w.traffic[j] > traf) traf = w.traffic[j];
       }
       let p = pol[i] - trees * 0.8 + (w.kind[i] === K.ROAD ? trafficPol : 0) + w.garbage[i] * 0.15;
       p = clamp(p, 0, 100); w.pollution[i] = p;
@@ -652,6 +667,9 @@ export class Sim {
     if (this.netDirty) this.computeNetworks();
     if (this.fieldsDirty) { this.computeTraffic(); this.computeFields(); }
     w.day++;
+    // stagger heavy passes on different days so no single tick stacks them
+    const phase = w.day % 10;
+    if (phase === 3) this.computeTraffic(); else if (phase === 7) this.computeFields();
     const changed = [];
     for (let i = this.slice; i < N; i += 6) {
       if (isZone(w.kind[i])) {
@@ -663,7 +681,6 @@ export class Sim {
     this.slice = (this.slice + 1) % 6;
     if (changed.length) { this.recount(); this.hooks.onTiles?.(changed); }
     if (w.day % 5 === 0) { this.recount(); this.computeDemand(); }
-    if (w.day % 10 === 0) this.fieldsDirty = true;
     if (w.day % DAYS_PER_MONTH === 0) this.monthly();
   }
 
@@ -679,7 +696,8 @@ export class Sim {
 
   monthly() {
     const w = this.w, s = this.stats;
-    this.computeNetworks(); this.computeTraffic(); this.computeFields(); this.recount(); this.computeDemand();
+    if (this.netDirty) this.computeNetworks();
+    this.recount(); this.computeDemand();
     s.tourists = this.tourism();
     // income — residents pay more in high land value areas
     let wealth = 0;

@@ -89,6 +89,13 @@ struct CityLayer: View {
                 }
                 FloatingButtons(compact: compact)
                 InspectCard(compact: compact)
+                if game.showPerf {
+                    Text(game.perfText).font(.system(size: 10, design: .monospaced)).padding(8)
+                        .background(.black.opacity(0.6), in: .rect(cornerRadius: 8))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(.leading, compact ? 8 : 180).padding(.bottom, compact ? 100 : 12)
+                        .allowsHitTesting(false)
+                }
             }
         }
     }

@@ -90,6 +90,10 @@ struct MenuSheet: View {
                     Toggle("Haptics", isOn: $game.settings.haptics)
                     Toggle("Disasters (fires)", isOn: $game.settings.disasters)
                 }
+                Section("Developer") {
+                    Toggle("Performance overlay", isOn: $game.showPerf)
+                    Button { game.runStressTest(); dismiss() } label: { Label("Run stress test (max-density city)", systemImage: "gauge.with.dots.needle.67percent") }
+                }
                 Section("Apple Intelligence") {
                     Text(game.intelligence.statusText).font(.footnote)
                 }
