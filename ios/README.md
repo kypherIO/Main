@@ -20,6 +20,39 @@ CI (`.github/workflows/ios.yml`) builds the app with `xcodebuild` for the iOS
 Simulator and for a generic device on every push, and runs the simulation
 unit tests (`swift test`) on Linux.
 
+## Install on your iPhone automatically
+
+**TestFlight (fully automatic, no Mac needed):**
+1. In App Store Connect, create the app (bundle ID `com.kypher.skyfold`) and an API key
+   under Users and Access → Integrations → App Store Connect API.
+2. Add the repository secrets `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+   `ASC_KEY_P8_BASE64` (`base64 -i AuthKey_XXXX.p8`).
+3. Install TestFlight on the phone, accept the build, and turn on **Automatic Updates**.
+
+After that, every push that touches `ios/` is archived, signed and uploaded by
+`.github/workflows/testflight.yml`, and the phone installs it by itself. Until the
+secrets exist, that workflow skips cleanly.
+
+**From your Mac (USB or Wi-Fi, also automatic):**
+```bash
+export TEAM_ID=ABCDE12345                       # your Apple Developer Team ID
+./ios/scripts/install-on-device.sh              # build → install → launch on the connected phone
+./ios/scripts/install-on-device.sh --stress     # launch into the max-density stress test with the perf overlay
+./ios/scripts/install-on-device.sh --watch      # leave running: reinstalls on every new commit
+```
+
+## Performance (stress test, CI)
+
+Max-density island (every buildable tile developed, 250+ services, all policies
+on, fires) simulated for 10 years:
+
+| Build | avg / day | p99 | worst | fields pass |
+|---|---|---|---|---|
+| Release (`-O`) | 0.25 ms | 1.77 ms | 2.66 ms | 0.86 ms |
+| Debug | 1.88 ms | 12.4 ms | 19.7 ms | 6.9 ms |
+
+The app also caps simulation work at about 4 ms per frame to protect 120 Hz.
+
 ## Architecture
 
 ```
