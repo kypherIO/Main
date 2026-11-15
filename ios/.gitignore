@@ -1,0 +1,6 @@
+Skyfold.xcodeproj/
+build/
+build-*.log
+DerivedData/
+.build/
+*.xcuserstate

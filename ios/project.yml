@@ -1,35 +1,64 @@
-# Generate the Xcode project with XcodeGen:  brew install xcodegen && cd ios && xcodegen
+# Generate the Xcode project with XcodeGen:
+#   brew install xcodegen && cd ios && xcodegen && open Skyfold.xcodeproj
 name: Skyfold
 options:
   bundleIdPrefix: com.kypher
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
   createIntermediateGroups: true
+packages:
+  SkyfoldCore:
+    path: Packages/SkyfoldCore
 settings:
   base:
     SWIFT_VERSION: "5.10"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "0.2.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
+    MTL_FAST_MATH: YES
+    MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
 targets:
   Skyfold:
     type: application
     platform: iOS
     sources:
       - path: Skyfold
-      - path: ../game
-        type: folder
-        buildPhase: resources
+    dependencies:
+      - package: SkyfoldCore
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: MetalFX.framework
+      - sdk: MetalPerformanceShaders.framework
+      - sdk: GameKit.framework
+      - sdk: GameController.framework
+      - sdk: CoreHaptics.framework
+      - sdk: AVFAudio.framework
+      - sdk: RealityKit.framework
+      - sdk: ARKit.framework
+      - sdk: AppIntents.framework
+      - sdk: FoundationModels.framework
+      - sdk: ImagePlayground.framework
+      - sdk: NaturalLanguage.framework
+    entitlements:
+      path: Skyfold/Skyfold.entitlements
+      properties:
+        com.apple.developer.game-center: true
     info:
       path: Skyfold/Info.plist
       properties:
         CFBundleDisplayName: Skyfold
+        LSApplicationCategoryType: public.app-category.simulation-games
+        GCSupportsGameMode: true                      # iOS Game Mode
+        GCSupportsControllerUserInteraction: true     # game controllers can drive the UI
+        GCSupportedGameControllers:
+          - ProfileName: ExtendedGamepad
+        CADisableMinimumFrameDurationOnPhone: true    # 120 Hz ProMotion
+        UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIStatusBarHidden: true
-        UIViewControllerBasedStatusBarAppearance: false
         UIRequiresFullScreen: false
-        CADisableMinimumFrameDurationOnPhone: true   # unlock 120 Hz ProMotion
+        NSCameraUsageDescription: Skyfold uses the camera to place your city on a table in augmented reality.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -45,4 +74,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kypher.skyfold
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.simulation-games
+        SWIFT_OBJC_BRIDGING_HEADER: Skyfold/Render/Skyfold-Bridging-Header.h
+schemes:
+  Skyfold:
+    build:
+      targets:
+        Skyfold: all
+    run:
+      config: Debug
+      environmentVariables:
+        MTL_HUD_ENABLED: "0"     # set to 1 for Apple's Metal Performance HUD
+    test:
+      config: Debug
