@@ -4,3 +4,5 @@ build-*.log
 DerivedData/
 .build/
 *.xcuserstate
+Skyfold/Info.plist
+Skyfold/Skyfold.entitlements
