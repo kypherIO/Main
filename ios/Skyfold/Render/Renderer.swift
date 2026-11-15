@@ -145,7 +145,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             d.colorProcessingMode = .perceptual
             if let sc = d.makeSpatialScaler(device: device) {
                 scaler = sc
-                ldr = makeTexture(.bgra8Unorm_srgb, w, h, [.renderTarget, .shaderRead].union(sc.colorTextureUsage))
+                ldr = makeTexture(.bgra8Unorm_srgb, w, h, MTLTextureUsage([.renderTarget, .shaderRead]).union(sc.colorTextureUsage))
                 upscaled = makeTexture(.bgra8Unorm_srgb, drawable.x, drawable.y, sc.outputTextureUsage)
             }
         }
