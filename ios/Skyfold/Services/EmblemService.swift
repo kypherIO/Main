@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImagePlayground
+import ImageIO
 
 /// Image Playground: generates a city flag/emblem on-device with ImageCreator.
 /// Players can also design their own via `.imagePlaygroundSheet` (see DeskView).
