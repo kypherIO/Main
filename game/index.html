@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Skyfold">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="Skyfold — a city builder designed for foldable iPhones.">
+  <title>Skyfold</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="icon" type="image/png" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+</head>
+<body class="posture-folded orient-portrait">
+  <div id="app">
+    <section id="view">
+      <canvas id="gl" aria-label="City view"></canvas>
+
+      <header id="topbar" class="glass">
+        <button id="btn-menu" class="icon-btn" aria-label="Menu"></button>
+        <div class="city-id">
+          <div id="city-name">New Harbor</div>
+          <div id="city-sub">Jan 2030 · Hamlet</div>
+        </div>
+        <div class="kpis">
+          <div class="kpi" title="Treasury"><span class="kpi-ico" data-icon="coin"></span><b id="k-funds">$50,000</b><small id="k-delta"></small></div>
+          <div class="kpi" title="Population"><span class="kpi-ico" data-icon="people"></span><b id="k-pop">0</b></div>
+          <div class="kpi wide-only" title="Happiness"><span class="kpi-ico" data-icon="smile"></span><b id="k-happy">60%</b></div>
+          <div class="kpi wide-only" title="Power"><span class="kpi-ico" data-icon="bolt"></span><b id="k-power">0/0</b></div>
+        </div>
+        <div class="rci" id="rci" title="Demand: Residential / Commercial / Industrial">
+          <div class="bar r"><i></i></div><div class="bar c"><i></i></div><div class="bar i"><i></i></div>
+        </div>
+        <div class="speed" id="speed" role="group" aria-label="Game speed"></div>
+      </header>
+
+      <div id="hint" class="glass hidden"></div>
+
+      <nav id="tools" class="glass" aria-label="Build tools"></nav>
+
+      <div id="fabs">
+        <button class="fab glass" id="fab-layers" aria-label="Map layers"></button>
+        <button class="fab glass" id="fab-desk" aria-label="City dashboard"></button>
+      </div>
+
+      <div id="layers" class="popover glass hidden"></div>
+      <div id="inspect" class="card glass hidden"></div>
+      <div id="toasts"></div>
+    </section>
+
+    <div id="hinge" aria-hidden="true"></div>
+
+    <aside id="desk-dock" aria-label="Mayor's desk"></aside>
+  </div>
+
+  <div id="sheet" class="sheet glass hidden" aria-hidden="true">
+    <div class="sheet-grab"></div>
+    <div id="sheet-body"></div>
+  </div>
+
+  <div id="modal" class="modal hidden"><div class="modal-card glass" id="modal-card"></div></div>
+
+  <div id="title" class="title-screen">
+    <div class="title-inner">
+      <div class="logo">
+        <div class="logo-mark"></div>
+        <h1>SKYFOLD</h1>
+        <p class="tag">Build a city that unfolds with you.</p>
+      </div>
+      <div class="title-actions" id="title-actions"></div>
+      <p class="fineprint">Best on a foldable iPhone · Add to Home Screen for full-screen 120&nbsp;Hz</p>
+    </div>
+  </div>
+
+  <div id="boot" class="boot"><div class="spinner"></div><span>Painting the skyline…</span></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
